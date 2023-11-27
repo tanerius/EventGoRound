@@ -1,6 +1,7 @@
 package eventgoround
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -24,22 +25,33 @@ type EventHandler interface {
 
 // The event manager
 type EventManager struct {
+	eqc            int
+	maxTypes       int
 	running        bool
-	quit           chan struct{}
 	eventQueue     chan Event
 	eventListeners map[int][]EventHandler
 }
 
 // Ctor for a new event manaher
-func NewEventManager(maxTypes int, eventQueueSize int) *EventManager {
+// maxTypes must be given signaling the maximum different event types
+// the second argument is the eventQueuesCapacity which if not given defaults to 100000
+func NewEventManager(maxTypes int, args ...int) *EventManager {
+	_eqc := eventQueuesCapacity
+
+	if len(args) > 0 {
+		_eqc = args[0]
+	}
+
 	return &EventManager{
+		eqc:            _eqc,
+		maxTypes:       maxTypes,
 		running:        false,
-		quit:           make(chan struct{}),
-		eventQueue:     make(chan Event, 10000),
-		eventListeners: make(map[int][]EventHandler),
+		eventQueue:     make(chan Event, _eqc),
+		eventListeners: make(map[int][]EventHandler, maxTypes),
 	}
 }
 
+// Dispatch an event
 func (m *EventManager) Dispatch(event Event) error {
 	select {
 	case m.eventQueue <- event:
@@ -50,13 +62,54 @@ func (m *EventManager) Dispatch(event Event) error {
 }
 
 // Register a handler for an event type
-func (m *EventManager) RegisterHandler(_h EventHandler) {
-	_id := _h.EventType()
+func (m *EventManager) RegisterHandler(_h EventHandler) error {
 	m.panicWhenEventLoopRunning()
+
+	if _h.EventType() >= m.maxTypes {
+		return errors.New("events maxlimit reached")
+	}
+
+	_id := _h.EventType()
+
 	if _, ok := m.eventListeners[_id]; !ok {
 		m.eventListeners[_id] = make([]EventHandler, 0, 10)
 	}
 	m.eventListeners[_id] = append(m.eventListeners[_id], _h)
+	return nil
+}
+
+// Run the event loop
+func (m *EventManager) Run() {
+	defer func() {
+		m.running = false
+	}()
+	m.running = true
+
+	for {
+		select {
+
+		case e := <-m.eventQueue:
+			if listeners, ok := m.eventListeners[e.Type()]; ok {
+				for _, handler := range listeners {
+					handler.HandleEvent(e)
+				}
+			}
+		default:
+			time.Sleep(idleDispatcherSleepTime)
+		}
+	}
+}
+
+func (m *EventManager) Stop() {
+	if !m.running {
+		return
+	}
+
+	close(m.eventQueue)
+	time.Sleep(idleDispatcherSleepTime)
+	m.eventListeners = make(map[int][]EventHandler, m.maxTypes)
+	m.eventQueue = make(chan Event, m.eqc)
+	m.running = false
 }
 
 func (m *EventManager) panicWhenEventLoopRunning() {
