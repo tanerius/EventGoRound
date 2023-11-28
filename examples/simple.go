@@ -30,6 +30,7 @@ func newSimpleEventHandler() eventgoround.EventHandler[*SimpleEvent] {
 }
 
 func main() {
+
 	// register a manager for an event type
 	manager := eventgoround.NewEventManager[*SimpleEvent]()
 
