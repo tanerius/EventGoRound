@@ -14,7 +14,7 @@ const (
 
 // Interface defining event type
 type Event interface {
-	Type() int
+	EType() int
 }
 
 // Interface defining event handler type
@@ -57,7 +57,7 @@ func (m *EventManager) Dispatch(event Event) error {
 	case m.eventQueue <- event:
 		return nil
 	default:
-		return fmt.Errorf("event manager failed to dispatch event %d", event.Type())
+		return fmt.Errorf("event manager failed to dispatch event %d", event.EType())
 	}
 }
 
@@ -89,7 +89,7 @@ func (m *EventManager) Run() {
 		select {
 
 		case e := <-m.eventQueue:
-			if listeners, ok := m.eventListeners[e.Type()]; ok {
+			if listeners, ok := m.eventListeners[e.EType()]; ok {
 				for _, handler := range listeners {
 					handler.HandleEvent(e)
 				}
