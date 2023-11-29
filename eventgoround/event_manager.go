@@ -3,6 +3,8 @@ package eventgoround
 import (
 	"fmt"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -21,7 +23,7 @@ type EventHandler[T Event] interface {
 	HandleEvent(T)
 }
 
-// A manager definition
+// A manager definition useful for grouping
 type IManager interface {
 	Run()
 	Stop()
@@ -31,6 +33,7 @@ type IManager interface {
 type EventManager[T Event] struct {
 	eqc            int
 	running        bool
+	terminated     bool
 	eventQueue     chan T
 	eventListeners []EventHandler[T]
 }
@@ -47,6 +50,7 @@ func NewEventManager[T Event](args ...int) *EventManager[T] {
 	return &EventManager[T]{
 		eqc:            _eqc,
 		running:        false,
+		terminated:     false,
 		eventQueue:     make(chan T, _eqc),
 		eventListeners: make([]EventHandler[T], 0),
 	}
@@ -62,8 +66,8 @@ func (m *EventManager[T]) Dispatch(event T) error {
 	}
 }
 
-// Register a handler for an event type
-func (m *EventManager[T]) RegisterHandler(_h EventHandler[T]) {
+// Subscribe a handler for an event type
+func (m *EventManager[T]) Subscribe(_h EventHandler[T]) {
 	m.panicWhenEventLoopRunning()
 
 	m.eventListeners = append(m.eventListeners, _h)
@@ -72,9 +76,16 @@ func (m *EventManager[T]) RegisterHandler(_h EventHandler[T]) {
 
 // Run the event loop
 func (m *EventManager[T]) Run() {
+	if m.running {
+		log.Fatalf("event manager %T already running", m)
+		return
+	}
+
 	defer func() {
+		m.eventQueue = make(chan T, m.eqc)
 		m.running = false
 	}()
+
 	m.running = true
 
 	for {
@@ -97,12 +108,8 @@ func (m *EventManager[T]) Stop() {
 	if !m.running {
 		return
 	}
-
 	close(m.eventQueue)
 	time.Sleep(idleDispatcherSleepTime)
-	m.eventListeners = make([]EventHandler[T], 0)
-	m.eventQueue = make(chan T, m.eqc)
-	m.running = false
 }
 
 func (m *EventManager[T]) panicWhenEventLoopRunning() {

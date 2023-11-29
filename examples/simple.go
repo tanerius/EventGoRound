@@ -35,7 +35,7 @@ func main() {
 	manager := eventgoround.NewEventManager[*SimpleEvent]()
 
 	// register a handler
-	manager.RegisterHandler(newSimpleEventHandler())
+	manager.Subscribe(newSimpleEventHandler())
 
 	// Run the event manager
 	go manager.Run()
