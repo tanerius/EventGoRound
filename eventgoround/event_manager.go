@@ -1,10 +1,8 @@
 package eventgoround
 
 import (
-	"fmt"
+	"log"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -13,107 +11,121 @@ const (
 	registeringListenerWhileRunningErrorMessage               = "Tried to register listener while running event loop. Registering listeners is not thread safe therefore prohibited after starting event loop."
 )
 
-// Interface defining event type
-type Event interface {
-	Id() string
+type eventHandler interface {
+	handle()
 }
 
-// event handler type
-type EventHandler[T Event] interface {
-	HandleEvent(T)
+type genericHandler struct {
+	event          *Event
+	eventListeners []Listener
 }
 
-// A manager definition useful for grouping
-type IManager interface {
-	Run()
-	Stop()
+func (handler *genericHandler) handle() {
+	for _, listener := range handler.eventListeners {
+		listener.HandleEvent(handler.event)
+	}
 }
 
-// The event manager
-type EventManager[T Event] struct {
-	eqc            int
-	running        bool
-	terminated     bool
-	eventQueue     chan T
-	eventListeners []EventHandler[T]
+type Listener interface {
+	Type() int
+	HandleEvent(*Event)
 }
 
-// Ctor for a new event manaher
-// the first argument is the eventQueuesCapacity which if not given defaults to 100000
-func NewEventManager[T Event](args ...int) *EventManager[T] {
-	_eqc := eventQueuesCapacity
+type EventManager struct {
+	running         bool
+	eqc             int
+	eventsPrioQueue chan eventHandler
+	eventsQueue     chan eventHandler
+
+	genericListeners map[int][]Listener
+}
+
+// Ctor for a new event manager
+// the first argument is the event queue capapcity which if not given defaults to 100000
+func NewEventManager(args ...int) *EventManager {
+	queueSize := eventQueuesCapacity
 
 	if len(args) > 0 {
-		_eqc = args[0]
+		queueSize = args[0]
 	}
 
-	return &EventManager[T]{
-		eqc:            _eqc,
-		running:        false,
-		terminated:     false,
-		eventQueue:     make(chan T, _eqc),
-		eventListeners: make([]EventHandler[T], 0),
-	}
-}
-
-// Dispatch an event
-func (m *EventManager[T]) Dispatch(event T) error {
-	select {
-	case m.eventQueue <- event:
-		return nil
-	default:
-		return fmt.Errorf("event manager failed to dispatch event %s", event.Id())
+	return &EventManager{
+		running:          false,
+		eqc:              queueSize,
+		eventsPrioQueue:  make(chan eventHandler, queueSize),
+		eventsQueue:      make(chan eventHandler, queueSize),
+		genericListeners: make(map[int][]Listener),
 	}
 }
 
-// Subscribe a handler for an event type
-func (m *EventManager[T]) Subscribe(_h EventHandler[T]) {
-	m.panicWhenEventLoopRunning()
-
-	m.eventListeners = append(m.eventListeners, _h)
-
-}
-
-// Run the event loop
-func (m *EventManager[T]) Run() {
-	if m.running {
-		log.Fatalf("event manager %T already running", m)
+func (dispatcher *EventManager) Run() {
+	if dispatcher.running {
+		log.Fatalf("event manager %T already running", dispatcher)
 		return
 	}
 
 	defer func() {
-		m.eventQueue = make(chan T, m.eqc)
-		m.running = false
+		dispatcher.eventsPrioQueue = make(chan eventHandler, dispatcher.eqc)
+		dispatcher.eventsQueue = make(chan eventHandler, dispatcher.eqc)
+		dispatcher.running = false
 	}()
 
-	m.running = true
+	dispatcher.running = true
 
 	for {
 		select {
-
-		case e, ok := <-m.eventQueue:
+		case handler, ok := <-dispatcher.eventsPrioQueue:
 			if !ok {
 				return
 			}
-			for _, handler := range m.eventListeners {
-				handler.HandleEvent(e)
+			handler.handle()
+
+		case handler, ok := <-dispatcher.eventsQueue:
+			if ok {
+				handler.handle()
 			}
+
 		default:
 			time.Sleep(idleDispatcherSleepTime)
 		}
 	}
 }
 
-func (m *EventManager[T]) Stop() {
-	if !m.running {
-		return
+func (dispatcher *EventManager) DispatchEvent(event *Event) {
+	handler := &genericHandler{
+		event:          event,
+		eventListeners: dispatcher.genericListeners[event.eventType],
 	}
-	close(m.eventQueue)
-	time.Sleep(idleDispatcherSleepTime)
+
+	dispatcher.eventsQueue <- handler
 }
 
-func (m *EventManager[T]) panicWhenEventLoopRunning() {
-	if m.running {
+func (dispatcher *EventManager) DispatchPriorityEvent(event *Event) {
+	handler := &genericHandler{
+		event:          event,
+		eventListeners: dispatcher.genericListeners[event.eventType],
+	}
+
+	dispatcher.eventsPrioQueue <- handler
+}
+
+func (dispatcher *EventManager) RegisterListener(listener Listener) {
+	if dispatcher.running {
 		panic(registeringListenerWhileRunningErrorMessage)
 	}
+
+	if _, ok := dispatcher.genericListeners[listener.Type()]; !ok {
+		dispatcher.genericListeners[listener.Type()] = make([]Listener, 0)
+	}
+
+	dispatcher.genericListeners[listener.Type()] = append(dispatcher.genericListeners[listener.Type()], listener)
+}
+
+func (dispatcher *EventManager) Stop() {
+	if !dispatcher.running {
+		return
+	}
+	close(dispatcher.eventsPrioQueue)
+	close(dispatcher.eventsQueue)
+	time.Sleep(idleDispatcherSleepTime)
 }
