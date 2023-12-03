@@ -2,6 +2,7 @@ package eventgoround
 
 import "errors"
 
+// An interface for the data sent with an event. This may be extended in the future
 type EventData interface{}
 
 // Struct defining event type
@@ -19,10 +20,12 @@ func NewEvent(_type int, _data EventData) *Event {
 	}
 }
 
+// Returns the event type. This is an integer for now
 func (e *Event) Type() int {
 	return e.eventType
 }
 
+// A generic function used to return the event data into its correct type
 func GetEventData[T EventData](_e *Event) (T, error) {
 	var zero T
 	if e, ok := _e.data.(T); ok {
