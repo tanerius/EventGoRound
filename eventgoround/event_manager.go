@@ -26,11 +26,13 @@ func (handler *genericHandler) handle() {
 	}
 }
 
+// An interface for event listeners
 type Listener interface {
 	Type() int
 	HandleEvent(*Event)
 }
 
+// Defines the event manager
 type EventManager struct {
 	running         bool
 	eqc             int
@@ -58,6 +60,7 @@ func NewEventManager(args ...int) *EventManager {
 	}
 }
 
+// Runs the main loop of the event manager
 func (dispatcher *EventManager) Run() {
 	if dispatcher.running {
 		log.Fatalf("event manager %T already running", dispatcher)
@@ -91,6 +94,7 @@ func (dispatcher *EventManager) Run() {
 	}
 }
 
+// Dispatches an event to the regular queue
 func (dispatcher *EventManager) DispatchEvent(event *Event) {
 	handler := &genericHandler{
 		event:          event,
@@ -100,6 +104,7 @@ func (dispatcher *EventManager) DispatchEvent(event *Event) {
 	dispatcher.eventsQueue <- handler
 }
 
+// Dispatches an event to the priority queue
 func (dispatcher *EventManager) DispatchPriorityEvent(event *Event) {
 	handler := &genericHandler{
 		event:          event,
@@ -109,6 +114,7 @@ func (dispatcher *EventManager) DispatchPriorityEvent(event *Event) {
 	dispatcher.eventsPrioQueue <- handler
 }
 
+// Register a new event listener (that must implement Listener interface)
 func (dispatcher *EventManager) RegisterListener(listener Listener) {
 	if dispatcher.running {
 		panic(registeringListenerWhileRunningErrorMessage)
@@ -121,6 +127,7 @@ func (dispatcher *EventManager) RegisterListener(listener Listener) {
 	dispatcher.genericListeners[listener.Type()] = append(dispatcher.genericListeners[listener.Type()], listener)
 }
 
+// Stops the main loop of the event manager. This will discard any pending calls in the event queues
 func (dispatcher *EventManager) Stop() {
 	if !dispatcher.running {
 		return
