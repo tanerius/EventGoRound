@@ -29,7 +29,7 @@ type EventLoop struct {
 func NewEventLoop(tickInterval time.Duration, registry IEventRegistry, logConfig *LogConfig) *EventLoop {
 	el := &EventLoop{
 		storage:      newEventStorage(),
-		eventChan:    make(chan Event, 100), // Buffered channel for better performance
+		eventChan:    make(chan Event, 2000), // Buffered channel for better performance
 		stopChan:     make(chan struct{}),
 		pauseChan:    make(chan bool),
 		isCatchingUp: false,
@@ -72,6 +72,11 @@ func (el *EventLoop) ScheduleEvent(timestamp int64, duration int64, handlername 
 	if el.IsPaused() {
 		el.logError("event scheduling failed - loop is paused", "handler", handlername, "timestamp", timestamp)
 		return fmt.Errorf("event loop is paused")
+	}
+
+	if el.IsCatchingUp() {
+		el.logError("event scheduling failed - currently catching up", "handler", handlername, "timestamp", timestamp)
+		return fmt.Errorf("currently catching up with past events")
 	}
 
 	handler, err := el.registry.GetHandler(handlername)
@@ -161,10 +166,7 @@ func (el *EventLoop) run() {
 			}
 
 		case event := <-el.eventChan:
-			// Only process new events when not catching up and not paused
-			if !el.IsCatchingUp() && !paused {
-				el.storage.add(event)
-			}
+			el.storage.add(event)
 		}
 	}
 }
