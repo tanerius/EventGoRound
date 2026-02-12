@@ -1,6 +1,0 @@
-{"time":"2026-02-12T15:40:20.824411683+01:00","level":"INFO","msg":"event loop started","tickInterval":100000000}
-{"time":"2026-02-12T15:40:20.824528783+01:00","level":"INFO","msg":"event scheduled","handler":"greet","timestamp":1770907220,"duration":0}
-{"time":"2026-02-12T15:40:20.824538056+01:00","level":"INFO","msg":"event scheduled","handler":"calculate","timestamp":1770907221,"duration":0}
-{"time":"2026-02-12T15:40:20.924850801+01:00","level":"INFO","msg":"processing events","timestamp":1770907220,"eventCount":1}
-{"time":"2026-02-12T15:40:21.025461458+01:00","level":"INFO","msg":"processing events","timestamp":1770907221,"eventCount":1}
-{"time":"2026-02-12T15:40:22.824715515+01:00","level":"INFO","msg":"event loop stopping"}
