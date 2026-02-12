@@ -49,16 +49,24 @@ func main() {
 		fmt.Printf("Sum: %d\n", sum)
 	})
 
-	// Create event loop with 100ms tick interval
-	eventLoop := eventgoround.NewEventLoop(100*time.Millisecond, registry)
+	// Create event loop with 100ms tick interval and enable logging
+	// Logs will be written to events.log with automatic rotation at 10MB
+	// IncludeInfo: true means both ERROR and INFO logs are written
+	logConfig := &eventgoround.LogConfig{
+		Enabled:     true,
+		FilePath:    "./events.log",
+		IncludeInfo: true, // Set to false to log only ERRORs
+	}
+	eventLoop := eventgoround.NewEventLoop(100*time.Millisecond, registry, logConfig)
+	// To disable logging entirely, pass nil: eventgoround.NewEventLoop(100*time.Millisecond, registry, nil)
 	eventLoop.Start()
 
 	// Schedule an immediate event
-	now := time.Now().UnixMilli()
+	now := time.Now().Unix()
 	eventLoop.ScheduleEvent(now, 0, "greet", "World")
 
 	// Schedule an event 1 second in the future
-	future := time.Now().Add(1 * time.Second).UnixMilli()
+	future := time.Now().Add(1 * time.Second).Unix()
 	eventLoop.ScheduleEvent(future, 0, "calculate", []int{1, 2, 3, 4, 5})
 
 	// Let events execute

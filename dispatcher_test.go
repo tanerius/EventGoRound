@@ -112,7 +112,7 @@ func TestSchedulePastEvents(t *testing.T) {
 	registry.RegisterHandler("past3", tracker.track("past3", nil, 0))
 
 	// Create event loop with short tick interval for faster tests
-	loop := NewEventLoop(50*time.Millisecond, registry)
+	loop := NewEventLoop(50*time.Millisecond, registry, nil)
 	loop.Start()
 	defer loop.Stop()
 
@@ -173,7 +173,7 @@ func TestScheduleCurrentTimeEvents(t *testing.T) {
 
 	registry.RegisterHandler("current", tracker.track("current", nil, 0))
 
-	loop := NewEventLoop(50*time.Millisecond, registry)
+	loop := NewEventLoop(50*time.Millisecond, registry, nil)
 	loop.Start()
 	defer loop.Stop()
 
@@ -216,7 +216,7 @@ func TestScheduleFutureEvents(t *testing.T) {
 
 	registry.RegisterHandler("future", tracker.track("future", nil, 0))
 
-	loop := NewEventLoop(50*time.Millisecond, registry)
+	loop := NewEventLoop(50*time.Millisecond, registry, nil)
 	loop.Start()
 	defer loop.Stop()
 
@@ -261,7 +261,7 @@ func TestScheduleDuringCatchUp(t *testing.T) {
 	registry.RegisterHandler("past", tracker.track("past", nil, 0))
 	registry.RegisterHandler("during_catchup", tracker.track("during_catchup", nil, 0))
 
-	loop := NewEventLoop(50*time.Millisecond, registry)
+	loop := NewEventLoop(50*time.Millisecond, registry, nil)
 	loop.Start()
 	defer loop.Stop()
 
@@ -344,7 +344,7 @@ func TestPanicRecovery(t *testing.T) {
 	// Register a normal handler that should execute after the panic
 	registry.RegisterHandler("normal", tracker.track("normal", nil, 0))
 
-	loop := NewEventLoop(50*time.Millisecond, registry)
+	loop := NewEventLoop(50*time.Millisecond, registry, nil)
 	loop.Start()
 	defer loop.Stop()
 

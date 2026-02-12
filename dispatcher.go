@@ -2,6 +2,7 @@ package eventgoround
 
 import (
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -18,11 +19,15 @@ type EventLoop struct {
 	pauseMu      sync.RWMutex
 	registry     IEventRegistry
 	tickInterval time.Duration
+	logger       *slog.Logger
+	logWriter    *RotatingFileWriter
+	includeInfo  bool
 }
 
 // NewEventLoop creates a new event loop with the specified tick interval
-func NewEventLoop(tickInterval time.Duration, registry IEventRegistry) *EventLoop {
-	return &EventLoop{
+// logConfig is optional - pass nil to disable logging
+func NewEventLoop(tickInterval time.Duration, registry IEventRegistry, logConfig *LogConfig) *EventLoop {
+	el := &EventLoop{
 		storage:      newEventStorage(),
 		eventChan:    make(chan Event, 100), // Buffered channel for better performance
 		stopChan:     make(chan struct{}),
@@ -32,38 +37,48 @@ func NewEventLoop(tickInterval time.Duration, registry IEventRegistry) *EventLoo
 		registry:     registry,
 		tickInterval: tickInterval,
 	}
-}
 
-func (el *EventLoop) log(msg string) {
+	// Initialize logger if config is provided
+	if logConfig != nil && logConfig.Enabled {
+		if writer, err := NewRotatingFileWriter(logConfig.FilePath, DefaultMaxBytes); err == nil {
+			el.logWriter = writer
+			el.logger = slog.New(slog.NewJSONHandler(writer, nil))
+			el.includeInfo = logConfig.IncludeInfo
+		}
+	}
 
+	return el
 }
 
 // Start begins the event loop processing
 func (el *EventLoop) Start() {
+	el.logInfo("event loop started", "tickInterval", el.tickInterval)
 	go el.run()
-	el.log("START: Event loop started")
 }
 
 // Stop gracefully stops the event loop
 func (el *EventLoop) Stop() {
+	el.logInfo("event loop stopping")
 	close(el.stopChan)
-	el.log("STOP: Event loop stopped")
+	if el.logWriter != nil {
+		el.logWriter.Close()
+	}
 }
 
 // ScheduleEvent schedules an event to be executed at the specified timestamp
 // This will block during catch-up mode until all past events are processed
 // Events cannot be scheduled when the loop is paused
-func (el *EventLoop) ScheduleEvent(timestamp int64, duration int64, handlername string, payload any) {
+func (el *EventLoop) ScheduleEvent(timestamp int64, duration int64, handlername string, payload any) error {
 	if el.IsPaused() {
-		el.log("SCHEDULE: Cannot schedule event - event loop is paused")
-		return
+		el.logError("event scheduling failed - loop is paused", "handler", handlername, "timestamp", timestamp)
+		return fmt.Errorf("event loop is paused")
 	}
 
 	handler, err := el.registry.GetHandler(handlername)
 
 	if err != nil {
-		el.log(fmt.Sprintf("SCHEDULE: Cannot schedule event - handler '%s' not found", handlername))
-		return
+		el.logError("event scheduling failed - handler not found", "handler", handlername, "timestamp", timestamp)
+		return fmt.Errorf("handler '%s' not found", handlername)
 	}
 
 	event := Event{
@@ -74,6 +89,8 @@ func (el *EventLoop) ScheduleEvent(timestamp int64, duration int64, handlername 
 		Payload:   payload,
 	}
 	el.eventChan <- event
+	el.logInfo("event scheduled", "handler", handlername, "timestamp", timestamp, "duration", duration)
+	return nil
 }
 
 // IsCatchingUp returns whether the loop is currently in catch-up mode
@@ -97,7 +114,7 @@ func (el *EventLoop) Pause() {
 		el.setCatchingUp(true)
 		el.isPaused = true
 		el.pauseMu.Unlock()
-		el.log("PAUSE: Event loop paused")
+		el.logInfo("event loop paused")
 		el.pauseChan <- true
 	} else {
 		el.pauseMu.Unlock()
@@ -110,7 +127,7 @@ func (el *EventLoop) Unpause() {
 	if el.isPaused {
 		el.isPaused = false
 		el.pauseMu.Unlock()
-		el.log("UNPAUSE: Event loop unpaused")
+		el.logInfo("event loop unpaused")
 		el.pauseChan <- false
 	} else {
 		el.pauseMu.Unlock()
@@ -122,12 +139,6 @@ func (el *EventLoop) setCatchingUp(state bool) {
 	el.catchUpMu.Lock()
 	defer el.catchUpMu.Unlock()
 	el.isCatchingUp = state
-	if state {
-		el.log("CATCH-UP START: Entering catch-up mode - blocking new event registration")
-
-	} else {
-		el.log("CATCH-UP END: Exiting catch-up mode - resuming normal operation")
-	}
 }
 
 // run is the main event loop
@@ -153,7 +164,6 @@ func (el *EventLoop) run() {
 			// Only process new events when not catching up and not paused
 			if !el.IsCatchingUp() && !paused {
 				el.storage.add(event)
-				el.log(fmt.Sprintf("SCHEDULE: Event scheduled for timestamp: %d", event.Timestamp+event.Duration))
 			}
 		}
 	}
@@ -177,13 +187,13 @@ func (el *EventLoop) processTick() {
 // processCatchUp processes all past events in chronological order
 func (el *EventLoop) processCatchUp(currentTime int64) {
 	timestamps := el.storage.getTimestampsUpTo(currentTime - 1) // Process only past events
-
-	el.log(fmt.Sprintf("CATCH-UP: Catching up on %d past timestamp(s)", len(timestamps)))
+	el.logInfo("entering catch-up mode", "pastEventCount", len(timestamps), "currentTime", currentTime)
 
 	for _, ts := range timestamps {
-		el.log(fmt.Sprintf("CATCH-UP EVENT: Processing past events for timestamp: %d (current: %d)", ts, currentTime))
 		el.processTimestamp(ts)
 	}
+
+	el.logInfo("exiting catch-up mode")
 }
 
 // processTimestamp fires all events for a specific timestamp
@@ -194,30 +204,35 @@ func (el *EventLoop) processTimestamp(timestamp int64) {
 		return
 	}
 
-	el.log(fmt.Sprintf("Firing %d event(s) for timestamp: %d", len(events), timestamp))
+	el.logInfo("processing events", "timestamp", timestamp, "eventCount", len(events))
 
 	// Fire all events for this timestamp in separate goroutines
-	for i, event := range events {
-		go el.executeHandler(event.handler, event.Payload, timestamp, i)
+	for _, event := range events {
+		go el.executeHandler(event.handler, event.Payload)
 	}
 }
 
 // executeHandler executes an event handler with panic recovery
-func (el *EventLoop) executeHandler(handler func(any), payload any, timestamp int64, index int) {
+func (el *EventLoop) executeHandler(handler func(any), payload any) {
 	defer func() {
 		if r := recover(); r != nil {
-			el.log(fmt.Sprintf("HANDLE: Event handler panicked at timestamp %d, index %d: %v", timestamp, index, r))
+			el.logError("handler panicked", "panic", r)
 		}
 	}()
 
 	handler(payload)
 }
 
-// GetStats returns current statistics about the event loop
-func (el *EventLoop) GetStats() string {
-	currentTime := time.Now().Unix()
-	pastTimestamps := el.storage.getTimestampsUpTo(currentTime - 1)
+// logInfo logs informational messages (only if IncludeInfo is enabled)
+func (el *EventLoop) logInfo(msg string, args ...any) {
+	if el.logger != nil && el.includeInfo {
+		el.logger.Info(msg, args...)
+	}
+}
 
-	return fmt.Sprintf("STATISTICS: Catching up: %v, Past events: %d timestamps",
-		el.IsCatchingUp(), len(pastTimestamps))
+// logError logs error messages (always logged when logger is enabled)
+func (el *EventLoop) logError(msg string, args ...any) {
+	if el.logger != nil {
+		el.logger.Error(msg, args...)
+	}
 }
